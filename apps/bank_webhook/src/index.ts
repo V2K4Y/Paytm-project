@@ -1,54 +1,69 @@
-import express from 'express'
-import db from "@repo/db/client"
-
+import express from "express";
+import db from "@repo/db/client";
 const app = express();
 
-app.post('/hdfcWebhook', async (req, res) => { 
-    // TODO: Add zod validation here!
-    type PaymentInformation = {
-        token: string
-        userId: string
+app.use(express.json())
+
+app.post("/hdfcWebhook", async (req, res) => {
+    //TODO: Add zod validation here?
+    //TODO: HDFC bank should ideally send us a secret so we know this is sent by them
+    // Check wether the onRampTransaction is processing then only process this method.
+    const paymentInformation: {
+        token: string;
+        userId: string;
         amount: string
-    }
-    const paymentInformation:PaymentInformation = {
+    } = {
         token: req.body.token,
         userId: req.body.user_identifier,
         amount: req.body.amount
+    };
+    const result = await db.onRampTransaction.findFirst({
+        where: {
+            token: paymentInformation.token,
+        },
+        select: {
+            status: true,
+        }
+    })
+    if(result?.status != 'Processing') {
+        return res.json({
+            message: "Invalid Request!"
+        })
     }
 
     try {
         await db.$transaction([
-            db.balance.update({
+            db.balance.updateMany({
                 where: {
                     userId: Number(paymentInformation.userId)
                 },
                 data: {
                     amount: {
+                        // You can also do the increment in database by adding but that not suggested.
                         increment: Number(paymentInformation.amount)
                     }
                 }
             }),
-        
-            db.onRampTransaction.update({
+            db.onRampTransaction.updateMany({
                 where: {
                     token: paymentInformation.token
-                },
+                }, 
                 data: {
-                    status: "Success"
+                    status: "Success",
                 }
             })
-        ])
+        ]);
 
-        res.status(200).json({
-            message: "captured"
+        res.json({
+            message: "Captured"
         })
-
-    } catch (error) {
-        console.log(error);
+    } catch(e) {
+        console.error(e);
         res.status(411).json({
-            message: "Error while processing webhook",
+            message: "Error while processing webhook"
         })
     }
+
 })
 
-app.listen(3005, () => (console.log("Listening on PORT: 3005")))
+app.listen(3003);
